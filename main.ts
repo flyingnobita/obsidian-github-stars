@@ -69,7 +69,7 @@ export default class GitHubStarsPlugin extends Plugin {
 		// Add a command to clear the cache
 		this.addCommand({
 			id: 'clear-github-stars-cache',
-			name: 'Clear GitHub Stars Cache',
+			name: 'Clear Cache',
 			callback: () => {
 				this.cache = {};
 				this.saveSettings();
@@ -80,7 +80,7 @@ export default class GitHubStarsPlugin extends Plugin {
 		// Add a command to refresh star counts for the current note
 		this.addCommand({
 			id: 'refresh-github-stars',
-			name: 'Refresh GitHub Stars for Current Note',
+			name: 'Refresh for Current Note',
 			checkCallback: (checking: boolean) => {
 				const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 				if (activeView) {
