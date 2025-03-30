@@ -1,4 +1,4 @@
-import { App, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, MarkdownPostProcessorContext } from 'obsidian';
+import { App, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, MarkdownPostProcessorContext, requestUrl } from 'obsidian';
 
 
 interface GitHubStarsSettings {
@@ -15,7 +15,7 @@ const DEFAULT_SETTINGS: GitHubStarsSettings = {
 	numberFormat: 'abbreviated'
 }
 
-// Interface for cache entries
+// Interface for cache entries	
 interface CacheEntry {
 	stars: number;
 	timestamp: number;
@@ -30,9 +30,9 @@ export default class GitHubStarsPlugin extends Plugin {
 		await this.loadSettings();
 
 		// This creates an icon in the left ribbon.
-		const ribbonIconEl = this.addRibbonIcon('star', 'Github Stars', (evt: MouseEvent) => {
+		const ribbonIconEl = this.addRibbonIcon('star', 'Github stars', (evt: MouseEvent) => {
 			// Called when the user clicks the icon.
-			new Notice('Processing GitHub Stars...');
+			new Notice('Processing GitHub stars...');
 
 			// Get the active markdown view
 			const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
@@ -69,18 +69,18 @@ export default class GitHubStarsPlugin extends Plugin {
 		// Add a command to clear the cache
 		this.addCommand({
 			id: 'clear-github-stars-cache',
-			name: 'Clear Cache',
+			name: 'Clear cache',
 			callback: () => {
 				this.cache = {};
 				this.saveSettings();
-				new Notice('GitHub Stars cache cleared');
+				new Notice('GitHub stars cache cleared');
 			}
 		});
 
 		// Add a command to refresh star counts for the current note
 		this.addCommand({
 			id: 'refresh-github-stars',
-			name: 'Refresh for Current Note',
+			name: 'Refresh for current note',
 			checkCallback: (checking: boolean) => {
 				const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 				if (activeView) {
@@ -242,14 +242,15 @@ export default class GitHubStarsPlugin extends Plugin {
 
 			const apiUrl = `https://api.github.com/repos/${owner}/${repo}`;
 
-			const response = await fetch(apiUrl, {
-				headers,
+			const response = await requestUrl({
+				url: apiUrl,
+				headers: headers,
 				method: 'GET'
 			});
 
 			// Handle rate limiting
-			const rateLimitRemaining = response.headers.get('X-RateLimit-Remaining');
-			const rateLimitReset = response.headers.get('X-RateLimit-Reset');
+			const rateLimitRemaining = response.headers['X-RateLimit-Remaining'];
+			const rateLimitReset = response.headers['X-RateLimit-Reset'];
 
 			if (rateLimitRemaining === '0' && rateLimitReset) {
 				const resetTime = new Date(parseInt(rateLimitReset) * 1000);
@@ -271,8 +272,8 @@ export default class GitHubStarsPlugin extends Plugin {
 				return null;
 			}
 
-			if (!response.ok) {
-				console.error(`Failed to fetch star count for ${owner}/${repo}: ${response.status} ${response.statusText}`);
+			if (response.status !== 200) {
+				console.error(`Failed to fetch star count for ${owner}/${repo}: ${response.status}`);
 
 				// If we have a cached value, use it even if expired
 				if (this.cache[cacheKey]) {
@@ -424,7 +425,7 @@ class GitHubStarsSettingTab extends PluginSettingTab {
 				.onClick(async () => {
 					this.plugin.cache = {};
 					await this.plugin.saveSettings();
-					new Notice('GitHub Stars cache cleared');
+					new Notice('GitHub stars cache cleared');
 				}));
 	}
 }

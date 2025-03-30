@@ -1,4 +1,4 @@
-# Obsidian GitHub Stars Plugin
+# GitHub Stars Plugin
 
 Display the number of stars next to GitHub repository links.
 
