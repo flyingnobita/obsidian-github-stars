@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-github-stars",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"description": "Obsidian plugin that displays the number of stars for GitHub repositories mentioned in notes",
 	"main": "main.js",
 	"scripts": {
