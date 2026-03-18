@@ -2,17 +2,16 @@
 
 Display the number of stars next to GitHub repository links.
 
-_Note: This plugin currently only display the stars in **Reading View**. In the future I hope to support it in Live Preview as well._
-
 ## Features
 
 -   Automatically detects GitHub repository URLs in your notes
--   Displays the star count next to each GitHub repository link
+-   Displays the star count next to each GitHub repository link in both **Reading View** and **Live Preview**
+-   Embed star counts directly into your markdown files so they are visible outside Obsidian
 -   Caches star counts to minimize API requests
 -   Configurable display format for star counts
 -   Optional GitHub API token support for higher rate limits
 -   Supports abbreviated number formatting (e.g., 1.2k instead of 1,234)
--   Command to refresh star counts for the current note
+-   Commands to refresh, embed, and remove star counts
 
 ## Examples
 
@@ -33,8 +32,10 @@ The plugin can be configured in the Settings tab:
 
 The plugin adds the following commands:
 
--   **Refresh GitHub Stars for Current Note**: Refreshes all GitHub star counts in the current note
--   **Clear GitHub Stars Cache**: Clears the cached star counts
+-   **Refresh for current note**: Refreshes all GitHub star counts in the current note
+-   **Clear cache**: Clears the cached star counts
+-   **Embed star counts in current note**: Writes star counts (e.g. `⭐ 1.2k`) directly into the markdown file after each GitHub link. Re-running updates existing counts.
+-   **Remove embedded star counts from current note**: Strips all embedded star counts from the file
 
 ## GitHub API Rate Limits
 
@@ -47,10 +48,6 @@ To create a GitHub personal access token:
 3. Give it a name and select the "public_repo" scope
 4. Click "Generate token"
 5. Copy the token and paste it in the plugin settings
-
-## Roadmap
-
--   [ ] Support for Live Preview mode
 
 ## Contributing
 
