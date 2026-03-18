@@ -117,6 +117,12 @@ function buildGitHubStarsViewPlugin(plugin: GitHubStarsPlugin) {
 						}
 					}
 
+					// Skip if a star count is already embedded in the text
+					const textAfter = view.state.doc.sliceString(insertPos, Math.min(insertPos + 20, view.state.doc.length));
+					if (/^ ⭐ [\d,.]+[kMB]?/.test(textAfter)) {
+						continue;
+					}
+
 					builder.add(
 						insertPos,
 						insertPos,
@@ -288,6 +294,13 @@ export default class GitHubStarsPlugin extends Plugin {
 			// Check if the link is a GitHub repository URL
 			const repoInfo = this.extractRepoInfo(url);
 			if (repoInfo) {
+				// Skip if a star count is already embedded in the text after the link
+				const nextSibling = link.nextSibling;
+				if (nextSibling && nextSibling.nodeType === Node.TEXT_NODE
+					&& nextSibling.textContent && /^\s*⭐ [\d,.]+[kMB]?/.test(nextSibling.textContent)) {
+					continue;
+				}
+
 				// Create a span to hold the star count with loading indicator
 				const starSpan = document.createElement('span');
 				starSpan.addClass('github-stars-count');
