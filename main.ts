@@ -213,6 +213,38 @@ export default class GitHubStarsPlugin extends Plugin {
 				return false;
 			}
 		});
+
+		// Add a command to embed star counts directly into the markdown file
+		this.addCommand({
+			id: 'embed-github-stars',
+			name: 'Embed star counts in current note',
+			checkCallback: (checking: boolean) => {
+				const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+				if (activeView) {
+					if (!checking) {
+						this.embedStarCounts();
+					}
+					return true;
+				}
+				return false;
+			}
+		});
+
+		// Add a command to remove embedded star counts from the file
+		this.addCommand({
+			id: 'remove-embedded-github-stars',
+			name: 'Remove embedded star counts from current note',
+			checkCallback: (checking: boolean) => {
+				const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+				if (activeView) {
+					if (!checking) {
+						this.removeEmbeddedStarCounts();
+					}
+					return true;
+				}
+				return false;
+			}
+		});
 	}
 
 	onunload() {
@@ -430,6 +462,96 @@ export default class GitHubStarsPlugin extends Plugin {
 			}
 
 			return null;
+		}
+	}
+
+	/**
+	 * Embed star counts directly into the markdown file content.
+	 * Inserts or updates inline star text (e.g. "⭐ 1.2k") after each GitHub link.
+	 */
+	async embedStarCounts(): Promise<void> {
+		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (!activeView || !activeView.file) {
+			new Notice('No active markdown view found');
+			return;
+		}
+
+		const file = activeView.file;
+		let content = await this.app.vault.read(file);
+
+		// Match markdown links to GitHub repos, with optional existing star count.
+		// Group 1: full markdown link  Group 2: owner  Group 3: repo  Group 4: existing star text
+		const linkRegex = /(\[[^\]]*\]\(https?:\/\/(?:www\.)?github\.com\/([^/\s)]+)\/([^/\s)#?]+)[^)]*\))( ⭐ [\d,.]+[kMB]?)?/g;
+
+		const matches: Array<{
+			index: number;
+			length: number;
+			linkText: string;
+			owner: string;
+			repo: string;
+		}> = [];
+
+		let match;
+		while ((match = linkRegex.exec(content)) !== null) {
+			matches.push({
+				index: match.index,
+				length: match[0].length,
+				linkText: match[1],
+				owner: match[2],
+				repo: match[3].replace(/\.git$/, ''),
+			});
+		}
+
+		if (matches.length === 0) {
+			new Notice('No GitHub links found in current note');
+			return;
+		}
+
+		new Notice(`Fetching star counts for ${matches.length} repositories...`);
+
+		// Process in reverse order so earlier positions are not shifted by replacements
+		let updatedCount = 0;
+		for (let i = matches.length - 1; i >= 0; i--) {
+			const m = matches[i];
+			const stars = await this.getStarCount(m.owner, m.repo);
+			if (stars !== null) {
+				const formatted = this.formatStarCount(stars);
+				const replacement = `${m.linkText} ${formatted}`;
+				content = content.substring(0, m.index) + replacement + content.substring(m.index + m.length);
+				updatedCount++;
+			}
+		}
+
+		if (updatedCount > 0) {
+			await this.app.vault.modify(file, content);
+			new Notice(`Embedded star counts for ${updatedCount} GitHub links`);
+		} else {
+			new Notice('Could not fetch star counts for any repositories');
+		}
+	}
+
+	/**
+	 * Remove embedded star counts from the markdown file content
+	 */
+	async removeEmbeddedStarCounts(): Promise<void> {
+		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (!activeView || !activeView.file) {
+			new Notice('No active markdown view found');
+			return;
+		}
+
+		const file = activeView.file;
+		let content = await this.app.vault.read(file);
+
+		// Match GitHub markdown links followed by an embedded star count
+		const starRegex = /(\[[^\]]*\]\(https?:\/\/(?:www\.)?github\.com\/[^)]+\)) ⭐ [\d,.]+[kMB]?/g;
+		const newContent = content.replace(starRegex, '$1');
+
+		if (newContent !== content) {
+			await this.app.vault.modify(file, newContent);
+			new Notice('Removed embedded star counts');
+		} else {
+			new Notice('No embedded star counts found');
 		}
 	}
 
