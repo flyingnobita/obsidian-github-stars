@@ -1,4 +1,6 @@
 import { App, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, MarkdownPostProcessorContext, requestUrl } from 'obsidian';
+import { EditorView, ViewPlugin, ViewUpdate, Decoration, DecorationSet, WidgetType } from '@codemirror/view';
+import { RangeSetBuilder } from '@codemirror/state';
 
 
 interface GitHubStarsSettings {
@@ -19,6 +21,120 @@ const DEFAULT_SETTINGS: GitHubStarsSettings = {
 interface CacheEntry {
 	stars: number;
 	timestamp: number;
+}
+
+/**
+ * Build the CodeMirror 6 ViewPlugin for Live Preview star count display.
+ * The plugin and widget classes are defined inside this function so they
+ * can capture a reference to the main Obsidian plugin instance.
+ */
+function buildGitHubStarsViewPlugin(plugin: GitHubStarsPlugin) {
+	class StarsWidget extends WidgetType {
+		constructor(private owner: string, private repo: string) {
+			super();
+		}
+
+		eq(other: StarsWidget): boolean {
+			return this.owner === other.owner && this.repo === other.repo;
+		}
+
+		toDOM(): HTMLElement {
+			const span = document.createElement('span');
+			span.addClass('github-stars-count');
+
+			// Use cached value for instant rendering when available
+			const cacheKey = `${this.owner}/${this.repo}`;
+			const cachedEntry = plugin.cache[cacheKey];
+			const now = Date.now();
+			const expiryTime = plugin.settings.cacheExpiry * 60 * 1000;
+
+			if (cachedEntry && (now - cachedEntry.timestamp < expiryTime)) {
+				span.setText(plugin.formatStarCount(cachedEntry.stars));
+				return span;
+			}
+
+			// Show loading state and fetch asynchronously
+			span.addClass('github-stars-loading');
+			span.setText('⭐ ...');
+
+			plugin.getStarCount(this.owner, this.repo).then(stars => {
+				span.removeClass('github-stars-loading');
+				if (stars !== null) {
+					span.setText(plugin.formatStarCount(stars));
+				} else {
+					span.setText('⭐ ?');
+					span.addClass('github-stars-error');
+				}
+			}).catch(() => {
+				span.removeClass('github-stars-loading');
+				span.setText('⭐ ?');
+				span.addClass('github-stars-error');
+			});
+
+			return span;
+		}
+	}
+
+	class StarsViewPlugin {
+		decorations: DecorationSet;
+
+		constructor(view: EditorView) {
+			this.decorations = this.buildDecorations(view);
+		}
+
+		update(update: ViewUpdate) {
+			if (update.docChanged || update.viewportChanged) {
+				this.decorations = this.buildDecorations(update.view);
+			}
+		}
+
+		destroy() {}
+
+		buildDecorations(view: EditorView): DecorationSet {
+			const builder = new RangeSetBuilder<Decoration>();
+			const githubUrlRegex = /https?:\/\/(www\.)?github\.com\/([^/\s)#?]+)\/([^/\s)#?]+)(\/[^\s)]*)?\/?(#[^\s)]*)?/g;
+
+			for (const { from, to } of view.visibleRanges) {
+				const text = view.state.doc.sliceString(from, to);
+				let match;
+
+				while ((match = githubUrlRegex.exec(text)) !== null) {
+					const owner = match[2];
+					let repo = match[3];
+
+					if (repo.endsWith('.git')) {
+						repo = repo.slice(0, -4);
+					}
+
+					const matchEnd = from + match.index + match[0].length;
+					let insertPos = matchEnd;
+
+					// If inside a markdown link [text](url), place widget after the closing )
+					if (matchEnd < view.state.doc.length) {
+						const charAfter = view.state.doc.sliceString(matchEnd, matchEnd + 1);
+						if (charAfter === ')') {
+							insertPos = matchEnd + 1;
+						}
+					}
+
+					builder.add(
+						insertPos,
+						insertPos,
+						Decoration.widget({
+							widget: new StarsWidget(owner, repo),
+							side: 1,
+						})
+					);
+				}
+			}
+
+			return builder.finish();
+		}
+	}
+
+	return ViewPlugin.fromClass(StarsViewPlugin, {
+		decorations: (value: StarsViewPlugin) => value.decorations,
+	});
 }
 
 export default class GitHubStarsPlugin extends Plugin {
@@ -60,8 +176,11 @@ export default class GitHubStarsPlugin extends Plugin {
 			console.error('Error loading cache:', error);
 		}
 
-		// Register the markdown post processor to find and enhance GitHub links
+		// Register the markdown post processor to find and enhance GitHub links (Reading View)
 		this.registerMarkdownPostProcessor(this.processMarkdown.bind(this));
+
+		// Register the CodeMirror 6 editor extension for Live Preview support
+		this.registerEditorExtension(buildGitHubStarsViewPlugin(this));
 
 		// Add settings tab
 		this.addSettingTab(new GitHubStarsSettingTab(this.app, this));
