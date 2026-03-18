@@ -11,7 +11,7 @@ interface GitHubStarsSettings {
 }
 
 const DEFAULT_SETTINGS: GitHubStarsSettings = {
-	cacheExpiry: 60, // Default cache expiry: 60 minutes
+	cacheExpiry: 1440, // Default cache expiry: 1440 minutes (1 day)
 	displayFormat: "⭐ {stars}",
 	apiToken: "",
 	numberFormat: 'abbreviated'
