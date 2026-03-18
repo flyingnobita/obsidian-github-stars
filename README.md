@@ -4,14 +4,14 @@ Display the number of stars next to GitHub repository links.
 
 ## Features
 
--   Automatically detects GitHub repository URLs in your notes
--   Displays the star count next to each GitHub repository link in both **Reading View** and **Live Preview**
--   Embed star counts directly into your markdown files so they are visible outside Obsidian
--   Caches star counts to minimize API requests
--   Configurable display format for star counts
--   Optional GitHub API token support for higher rate limits
--   Supports abbreviated number formatting (e.g., 1.2k instead of 1,234)
--   Commands to refresh, embed, and remove star counts
+- Automatically detects GitHub repository URLs in your notes
+- Displays the star count next to each GitHub repository link in both **Reading View** and **Live Preview**
+- Embed star counts directly into your markdown files so they are **visible outside Obsidian**
+- Caches star counts to minimize API requests
+- Configurable display format for star counts
+- Optional GitHub API token support for higher rate limits
+- Supports abbreviated number formatting (e.g., 1.2k instead of 1,234)
+- Commands to refresh, embed, and remove star counts
 
 ## Examples
 
@@ -23,19 +23,19 @@ When you include a GitHub repository URL in your notes, the plugin will automati
 
 The plugin can be configured in the Settings tab:
 
--   **Cache Expiry**: Time in minutes before the GitHub star count cache expires (default: 1440 minutes / 1 day)
--   **Display Format**: Format for displaying star counts. Use `{stars}` as a placeholder for the number (default: `⭐ {stars}`)
--   **Number Format**: Choose between full numbers (e.g., 1,234) or abbreviated format (e.g., 1.2k)
--   **GitHub API Token**: Optional personal access token for GitHub API to increase rate limits
+- **Cache Expiry**: Time in minutes before the GitHub star count cache expires (default: 1440 minutes / 1 day)
+- **Display Format**: Format for displaying star counts. Use `{stars}` as a placeholder for the number (default: `⭐ {stars}`)
+- **Number Format**: Choose between full numbers (e.g., 1,234) or abbreviated format (e.g., 1.2k)
+- **GitHub API Token**: Optional personal access token for GitHub API to increase rate limits
 
 ## Commands
 
 The plugin adds the following commands:
 
--   **Refresh for current note**: Refreshes all GitHub star counts in the current note
--   **Clear cache**: Clears the cached star counts
--   **Embed star counts in current note**: Writes star counts (e.g. `⭐ 1.2k`) directly into the markdown file after each GitHub link. Re-running updates existing counts.
--   **Remove embedded star counts from current note**: Strips all embedded star counts from the file
+- **Refresh for current note**: Refreshes all GitHub star counts in the current note
+- **Clear cache**: Clears the cached star counts
+- **Embed star counts in current note**: Writes star counts (e.g. `⭐ 1.2k`) directly into the markdown file after each GitHub link. Re-running updates existing counts.
+- **Remove embedded star counts from current note**: Strips all embedded star counts from the file
 
 ## GitHub API Rate Limits
 
