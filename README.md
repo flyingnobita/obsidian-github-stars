@@ -23,7 +23,7 @@ When you include a GitHub repository URL in your notes, the plugin will automati
 
 The plugin can be configured in the Settings tab:
 
--   **Cache Expiry**: Time in minutes before the GitHub star count cache expires (default: 60 minutes)
+-   **Cache Expiry**: Time in minutes before the GitHub star count cache expires (default: 1440 minutes / 1 day)
 -   **Display Format**: Format for displaying star counts. Use `{stars}` as a placeholder for the number (default: `⭐ {stars}`)
 -   **Number Format**: Choose between full numbers (e.g., 1,234) or abbreviated format (e.g., 1.2k)
 -   **GitHub API Token**: Optional personal access token for GitHub API to increase rate limits
