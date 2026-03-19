@@ -1,24 +1,35 @@
 import { App, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, MarkdownPostProcessorContext, requestUrl } from 'obsidian';
 import { EditorView, ViewPlugin, ViewUpdate, Decoration, DecorationSet, WidgetType } from '@codemirror/view';
 import { RangeSetBuilder } from '@codemirror/state';
+import { extractReposFromContent, findEmbeddedGitHubLinkMatches, findGitHubLinkMatches, GitHubLinkMatch, RepoRef, rewriteGitHubLinksWithStars, shouldUseCachedEntry } from './githubStarsCore';
 
 
 interface GitHubStarsSettings {
 	cacheExpiry: number; // Time in minutes before cache expires
 	apiToken: string; // Optional GitHub API token for higher rate limits
 	numberFormat: 'full' | 'abbreviated'; // Number formatting style
+	updateEmbeddedStarsOnRefresh: boolean; // Whether refresh updates embedded star counts in the note
+	showTokenWarnings: boolean; // Whether manual refresh shows warnings for missing or invalid tokens
 }
 
 const DEFAULT_SETTINGS: GitHubStarsSettings = {
 	cacheExpiry: 1440, // Default cache expiry: 1440 minutes (1 day)
 	apiToken: "",
-	numberFormat: 'abbreviated'
+	numberFormat: 'abbreviated',
+	updateEmbeddedStarsOnRefresh: true,
+	showTokenWarnings: true
 }
 
 // Interface for cache entries	
 interface CacheEntry {
 	stars: number;
 	timestamp: number;
+}
+
+interface StarCountFetchResult {
+	stars: number | null;
+	refreshedFromGitHub: boolean;
+	fetchFailed: boolean;
 }
 
 /**
@@ -59,6 +70,7 @@ function buildGitHubStarsViewPlugin(plugin: GitHubStarsPlugin) {
 				span.removeClass('github-stars-loading');
 				if (stars !== null) {
 					span.setText(plugin.formatStarCount(stars));
+					plugin.scheduleEmbeddedStarUpdate([{ owner: this.owner, repo: this.repo }]);
 				} else {
 					span.setText('⭐ ?');
 					span.addClass('github-stars-error');
@@ -144,6 +156,11 @@ function buildGitHubStarsViewPlugin(plugin: GitHubStarsPlugin) {
 export default class GitHubStarsPlugin extends Plugin {
 	settings: GitHubStarsSettings;
 	cache: Record<string, CacheEntry> = {};
+	activeRefreshRunId = 0;
+	lastMissingTokenWarningRefreshId = 0;
+	lastInvalidTokenWarningRefreshId = 0;
+	pendingEmbeddedUpdateRepos = new Set<string>();
+	pendingEmbeddedUpdateTimer: ReturnType<typeof setTimeout> | null = null;
 
 	async onload() {
 		// Load settings
@@ -154,31 +171,10 @@ export default class GitHubStarsPlugin extends Plugin {
 			// Called when the user clicks the icon.
 			new Notice('Processing GitHub stars...');
 
-			// Get the active markdown view
-			const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-			if (activeView) {
-				// Force refresh by triggering the markdown processor
-				activeView.previewMode.rerender(true);
-				new Notice('GitHub star counts refreshed!');
-			} else {
-				new Notice('No active markdown view found');
-			}
+			this.refreshCurrentNote();
 		});
 		// Perform additional things with the ribbon
 		ribbonIconEl.addClass('github-stars-ribbon-class');
-
-		// Load cache from data
-		try {
-
-			const loadedCache = await this.loadData();
-
-			// Check if we have a cache property in the loaded data
-			if (loadedCache && loadedCache.cache) {
-				this.cache = loadedCache.cache;
-			}
-		} catch (error) {
-			console.error('Error loading cache:', error);
-		}
 
 		// Register the markdown post processor to find and enhance GitHub links (Reading View)
 		this.registerMarkdownPostProcessor(this.processMarkdown.bind(this));
@@ -208,9 +204,7 @@ export default class GitHubStarsPlugin extends Plugin {
 				const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
 				if (activeView) {
 					if (!checking) {
-						// Force refresh by triggering the markdown processor
-						activeView.previewMode.rerender(true);
-						new Notice('Refreshing GitHub star counts...');
+						this.refreshCurrentNote();
 					}
 					return true;
 				}
@@ -259,6 +253,10 @@ export default class GitHubStarsPlugin extends Plugin {
 	async loadSettings() {
 		const data = await this.loadData();
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
+		if (typeof this.settings.updateEmbeddedStarsOnRefresh !== 'boolean'
+			&& data && typeof data.refreshEmbeddedStars === 'string') {
+			this.settings.updateEmbeddedStarsOnRefresh = data.refreshEmbeddedStars === 'update';
+		}
 		// Store cache separately if it exists in the loaded data
 		if (data && data.cache) {
 			this.cache = data.cache;
@@ -272,6 +270,89 @@ export default class GitHubStarsPlugin extends Plugin {
 			cache: this.cache
 		};
 		await this.saveData(dataToSave);
+	}
+
+	private getActiveMarkdownFileView(): MarkdownView | null {
+		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (!activeView || !activeView.file) {
+			return null;
+		}
+
+		return activeView;
+	}
+
+	private requireActiveFile(view: MarkdownView): NonNullable<MarkdownView['file']> | null {
+		const file = view.file;
+		if (!file) {
+			new Notice('No active markdown view found');
+			return null;
+		}
+
+		return file;
+	}
+
+	private getCachedStars(owner: string, repo: string): number | null {
+		const stars = this.cache[`${owner}/${repo}`]?.stars;
+		return typeof stars === 'number' ? stars : null;
+	}
+
+	private getFormattedCachedStars(match: GitHubLinkMatch): string | null {
+		const stars = this.getCachedStars(match.owner, match.repo);
+		return stars === null ? null : this.formatStarCount(stars);
+	}
+
+	private rerenderMarkdownView(view: MarkdownView): void {
+		view.previewMode.rerender(true);
+	}
+
+	private getRepoCacheKey(owner: string, repo: string): string {
+		return `${owner}/${repo}`;
+	}
+
+	private shouldShowTokenWarningDuringRefresh(): boolean {
+		return this.settings.showTokenWarnings && this.activeRefreshRunId > 0;
+	}
+
+	scheduleEmbeddedStarUpdate(repos: RepoRef[]): void {
+		if (!this.settings.updateEmbeddedStarsOnRefresh || repos.length === 0) {
+			return;
+		}
+
+		for (const { owner, repo } of repos) {
+			this.pendingEmbeddedUpdateRepos.add(this.getRepoCacheKey(owner, repo));
+		}
+
+		if (this.pendingEmbeddedUpdateTimer !== null) {
+			return;
+		}
+
+		this.pendingEmbeddedUpdateTimer = setTimeout(() => {
+			void this.flushScheduledEmbeddedStarUpdates();
+		}, 50);
+	}
+
+	private async flushScheduledEmbeddedStarUpdates(): Promise<void> {
+		const pendingKeys = new Set(this.pendingEmbeddedUpdateRepos);
+		this.pendingEmbeddedUpdateRepos.clear();
+
+		if (this.pendingEmbeddedUpdateTimer !== null) {
+			clearTimeout(this.pendingEmbeddedUpdateTimer);
+			this.pendingEmbeddedUpdateTimer = null;
+		}
+
+		if (pendingKeys.size === 0) {
+			return;
+		}
+
+		await this.rewriteActiveNoteStars({
+			findMatches: findEmbeddedGitHubLinkMatches,
+			noLinksNotice: null,
+			progressNotice: null,
+			successNotice: null,
+			fetchLatest: false,
+			failureNotice: null,
+			shouldRewriteMatch: (match) => pendingKeys.has(this.getRepoCacheKey(match.owner, match.repo)),
+		});
 	}
 
 	/**
@@ -316,6 +397,7 @@ export default class GitHubStarsPlugin extends Plugin {
 					if (stars !== null) {
 						const formattedStars = this.formatStarCount(stars);
 						starSpan.setText(formattedStars);
+						this.scheduleEmbeddedStarUpdate([repoInfo]);
 					} else {
 						starSpan.setText('⭐ ?');
 						starSpan.addClass('github-stars-error');
@@ -375,42 +457,46 @@ export default class GitHubStarsPlugin extends Plugin {
 	 * Get star count for a GitHub repository
 	 * Uses cache if available and not expired
 	 */
-	async getStarCount(owner: string, repo: string): Promise<number | null> {
-		const cacheKey = `${owner}/${repo}`;
+	async getStarCount(owner: string, repo: string, forceRefresh = false): Promise<number | null> {
+		const result = await this.fetchStarCount(owner, repo, forceRefresh);
+		return result.stars;
+	}
 
-		// Check if we have a valid cache entry
-		if (this.cache[cacheKey]) {
-			const entry = this.cache[cacheKey];
-			const now = Date.now();
-			const expiryTime = this.settings.cacheExpiry * 60 * 1000; // Convert minutes to milliseconds
-
-			// If cache entry is still valid, use it
-			if (now - entry.timestamp < expiryTime) {
-				return entry.stars;
-			}
+	private async fetchStarCount(owner: string, repo: string, forceRefresh = false): Promise<StarCountFetchResult> {
+		const cacheKey = this.getRepoCacheKey(owner, repo);
+		const entry = this.cache[cacheKey];
+		if (shouldUseCachedEntry(entry, this.settings.cacheExpiry, Date.now(), forceRefresh)) {
+			return {
+				stars: entry.stars,
+				refreshedFromGitHub: false,
+				fetchFailed: false,
+			};
 		}
 
 		try {
-			// Fetch star count from GitHub API
-			const headers: Record<string, string> = {
-				'Accept': 'application/vnd.github.v3+json',
-				'User-Agent': 'Obsidian-GitHub-Stars-Plugin'
-			};
+			const apiUrl = `https://api.github.com/repos/${owner}/${repo}`;
+			const hasToken = this.settings.apiToken.trim() !== '';
 
-			// Add API token if available
-			if (this.settings.apiToken && this.settings.apiToken.trim() !== '') {
-				headers['Authorization'] = `token ${this.settings.apiToken.trim()}`;
+			if (!hasToken
+				&& this.shouldShowTokenWarningDuringRefresh()
+				&& this.lastMissingTokenWarningRefreshId !== this.activeRefreshRunId) {
+				console.warn('GitHub Stars: No GitHub API token configured. Requests will use the lower unauthenticated rate limit. Add a valid token in plugin settings for higher limits.');
+				this.lastMissingTokenWarningRefreshId = this.activeRefreshRunId;
 			}
 
-			const apiUrl = `https://api.github.com/repos/${owner}/${repo}`;
+			let response = await this.fetchRepoDetails(apiUrl, hasToken);
 
-			const response = await requestUrl({
-				url: apiUrl,
-				headers: headers,
-				method: 'GET'
-			});
+			if (response.status === 401 && hasToken) {
+				if (this.shouldShowTokenWarningDuringRefresh()
+					&& this.lastInvalidTokenWarningRefreshId !== this.activeRefreshRunId) {
+					console.warn(`GitHub Stars: GitHub API token was rejected for ${owner}/${repo}. Retrying without authentication. Add a valid token in plugin settings for higher limits.`);
+					new Notice('GitHub API token was rejected. Retrying without authentication.');
+					this.lastInvalidTokenWarningRefreshId = this.activeRefreshRunId;
+				}
 
-			// Handle rate limiting
+				response = await this.fetchRepoDetails(apiUrl, false);
+			}
+
 			const rateLimitRemaining = response.headers['X-RateLimit-Remaining'];
 			const rateLimitReset = response.headers['X-RateLimit-Reset'];
 
@@ -420,60 +506,124 @@ export default class GitHubStarsPlugin extends Plugin {
 				const minutesUntilReset = Math.ceil((resetTime.getTime() - now.getTime()) / (60 * 1000));
 
 				console.warn(`GitHub API rate limit exceeded. Resets in ${minutesUntilReset} minutes.`);
-
-				// If we have a cached value, use it even if expired
-				if (this.cache[cacheKey]) {
-					return this.cache[cacheKey].stars;
-				}
-
-				return null;
+				return this.getFailedFetchResult(cacheKey);
 			}
 
 			if (response.status === 404) {
 				console.error(`Repository ${owner}/${repo} not found`);
-				return null;
+				return this.getFailedFetchResult(cacheKey);
 			}
 
 			if (response.status !== 200) {
 				console.error(`Failed to fetch star count for ${owner}/${repo}: ${response.status}`);
-
-				// If we have a cached value, use it even if expired
-				if (this.cache[cacheKey]) {
-					return this.cache[cacheKey].stars;
-				}
-
-				return null;
+				return this.getFailedFetchResult(cacheKey);
 			}
 
 			const data = response.json;
 
 			if (!data || typeof data.stargazers_count !== 'number') {
 				console.error(`Invalid response data for ${owner}/${repo}`);
-				return null;
+				return this.getFailedFetchResult(cacheKey);
 			}
 
 			const stars = data.stargazers_count;
-
-			// Update cache
 			this.cache[cacheKey] = {
 				stars,
 				timestamp: Date.now()
 			};
-
-			// Save cache to disk
 			this.saveSettings();
 
-			return stars;
+			return {
+				stars,
+				refreshedFromGitHub: true,
+				fetchFailed: false,
+			};
 		} catch (error) {
 			console.error(`Error fetching star count for ${owner}/${repo}:`, error);
-
-			// If we have a cached value, use it even if expired
-			if (this.cache[cacheKey]) {
-				return this.cache[cacheKey].stars;
-			}
-
-			return null;
+			return this.getFailedFetchResult(cacheKey);
 		}
+	}
+
+	private getFailedFetchResult(cacheKey: string): StarCountFetchResult {
+		const cachedStars = this.cache[cacheKey]?.stars ?? null;
+		return {
+			stars: cachedStars,
+			refreshedFromGitHub: false,
+			fetchFailed: true,
+		};
+	}
+
+	private async fetchRepoDetails(apiUrl: string, useToken: boolean) {
+		const headers: Record<string, string> = {
+			'Accept': 'application/vnd.github.v3+json',
+			'User-Agent': 'Obsidian-GitHub-Stars-Plugin',
+			'X-GitHub-Api-Version': '2022-11-28'
+		};
+
+		if (useToken) {
+			headers['Authorization'] = `Bearer ${this.settings.apiToken.trim()}`;
+		}
+
+		return requestUrl({
+			url: apiUrl,
+			headers,
+			method: 'GET'
+		});
+	}
+
+	private async refreshCurrentNote(): Promise<void> {
+		const activeView = this.getActiveMarkdownFileView();
+		if (!activeView) {
+			new Notice('No active markdown view found');
+			return;
+		}
+
+		this.activeRefreshRunId += 1;
+		const file = this.requireActiveFile(activeView);
+		if (!file) {
+			return;
+		}
+
+		const content = await this.app.vault.read(file);
+		const repos = extractReposFromContent(content);
+		const refreshResults = new Map<string, StarCountFetchResult>();
+		let hadRefreshFailure = false;
+
+		if (repos.length > 0) {
+			await Promise.all(repos.map(async ({ owner, repo }) => {
+				const result = await this.fetchStarCount(owner, repo, true);
+				refreshResults.set(this.getRepoCacheKey(owner, repo), result);
+				hadRefreshFailure = hadRefreshFailure || result.fetchFailed;
+			}));
+		}
+
+		if (this.settings.updateEmbeddedStarsOnRefresh) {
+			new Notice('Refreshing GitHub star counts and updating embedded stars...');
+			await this.updateEmbeddedStarCounts(refreshResults);
+			if (hadRefreshFailure) {
+				new Notice('Some GitHub star counts could not be refreshed.');
+			}
+			this.rerenderMarkdownView(activeView);
+			return;
+		}
+
+		if (hadRefreshFailure) {
+			new Notice('Some GitHub star counts could not be refreshed.');
+		}
+		this.rerenderMarkdownView(activeView);
+		new Notice('Refreshing GitHub star counts...');
+	}
+
+	private async updateEmbeddedStarCounts(refreshResults: Map<string, StarCountFetchResult>): Promise<void> {
+		await this.rewriteActiveNoteStars({
+			findMatches: findEmbeddedGitHubLinkMatches,
+			noLinksNotice: null,
+			progressNotice: null,
+			successNotice: null,
+			fetchLatest: false,
+			failureNotice: null,
+			shouldRewriteMatch: (match) => refreshResults.get(this.getRepoCacheKey(match.owner, match.repo))?.refreshedFromGitHub === true,
+		});
 	}
 
 	/**
@@ -481,77 +631,32 @@ export default class GitHubStarsPlugin extends Plugin {
 	 * Inserts or updates inline star text (e.g. "⭐ 1.2k") after each GitHub link.
 	 */
 	async embedStarCounts(): Promise<void> {
-		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-		if (!activeView || !activeView.file) {
-			new Notice('No active markdown view found');
-			return;
-		}
-
-		const file = activeView.file;
-		let content = await this.app.vault.read(file);
-
-		// Match markdown links to GitHub repos, with optional existing star count.
-		// Group 1: full markdown link  Group 2: owner  Group 3: repo  Group 4: existing star text
-		const linkRegex = /(\[[^\]]*\]\(https?:\/\/(?:www\.)?github\.com\/([^/\s)]+)\/([^/\s)#?]+)[^)]*\))( ⭐ [\d,.]+[kMB]?)?/g;
-
-		const matches: Array<{
-			index: number;
-			length: number;
-			linkText: string;
-			owner: string;
-			repo: string;
-		}> = [];
-
-		let match;
-		while ((match = linkRegex.exec(content)) !== null) {
-			matches.push({
-				index: match.index,
-				length: match[0].length,
-				linkText: match[1],
-				owner: match[2],
-				repo: match[3].replace(/\.git$/, ''),
-			});
-		}
-
-		if (matches.length === 0) {
-			new Notice('No GitHub links found in current note');
-			return;
-		}
-
-		new Notice(`Fetching star counts for ${matches.length} repositories...`);
-
-		// Process in reverse order so earlier positions are not shifted by replacements
-		let updatedCount = 0;
-		for (let i = matches.length - 1; i >= 0; i--) {
-			const m = matches[i];
-			const stars = await this.getStarCount(m.owner, m.repo);
-			if (stars !== null) {
-				const formatted = this.formatStarCount(stars);
-				const replacement = `${m.linkText} ${formatted}`;
-				content = content.substring(0, m.index) + replacement + content.substring(m.index + m.length);
-				updatedCount++;
-			}
-		}
-
-		if (updatedCount > 0) {
-			await this.app.vault.modify(file, content);
-			new Notice(`Embedded star counts for ${updatedCount} GitHub links`);
-		} else {
-			new Notice('Could not fetch star counts for any repositories');
-		}
+		await this.rewriteActiveNoteStars({
+			findMatches: findGitHubLinkMatches,
+			noLinksNotice: 'No GitHub links found in current note',
+			progressNotice: (count) => `Fetching star counts for ${count} repositories...`,
+			successNotice: (count) => `Embedded star counts for ${count} GitHub links`,
+			fetchLatest: false,
+			failureNotice: 'Could not fetch star counts for any repositories',
+			shouldRewriteMatch: () => true,
+		});
 	}
 
 	/**
 	 * Remove embedded star counts from the markdown file content
 	 */
 	async removeEmbeddedStarCounts(): Promise<void> {
-		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-		if (!activeView || !activeView.file) {
+		const activeView = this.getActiveMarkdownFileView();
+		if (!activeView) {
 			new Notice('No active markdown view found');
 			return;
 		}
 
-		const file = activeView.file;
+		const file = this.requireActiveFile(activeView);
+		if (!file) {
+			return;
+		}
+
 		let content = await this.app.vault.read(file);
 
 		// Match GitHub markdown links followed by an embedded star count
@@ -564,6 +669,73 @@ export default class GitHubStarsPlugin extends Plugin {
 		} else {
 			new Notice('No embedded star counts found');
 		}
+	}
+
+	private async rewriteActiveNoteStars(options: {
+		findMatches: (content: string) => GitHubLinkMatch[];
+		noLinksNotice: string | null;
+		progressNotice: ((count: number) => string) | null;
+		successNotice: ((count: number) => string) | null;
+		fetchLatest: boolean;
+		failureNotice: string | null;
+		shouldRewriteMatch: (match: GitHubLinkMatch) => boolean;
+	}): Promise<number> {
+		const activeView = this.getActiveMarkdownFileView();
+		if (!activeView) {
+			new Notice('No active markdown view found');
+			return 0;
+		}
+
+		const file = this.requireActiveFile(activeView);
+		if (!file) {
+			return 0;
+		}
+
+		const content = await this.app.vault.read(file);
+		const matches = options.findMatches(content);
+
+		if (matches.length === 0) {
+			if (options.noLinksNotice) {
+				new Notice(options.noLinksNotice);
+			}
+			return 0;
+		}
+
+		if (options.progressNotice) {
+			new Notice(options.progressNotice(matches.length));
+		}
+
+		if (options.fetchLatest) {
+			for (const match of matches) {
+				await this.getStarCount(match.owner, match.repo, true);
+			}
+		} else {
+			for (const match of matches) {
+				await this.getStarCount(match.owner, match.repo);
+			}
+		}
+
+		const result = rewriteGitHubLinksWithStars(content, matches, (match) => {
+			if (!options.shouldRewriteMatch(match)) {
+				return null;
+			}
+
+			return this.getFormattedCachedStars(match);
+		});
+
+		if (result.updatedCount > 0) {
+			await this.app.vault.modify(file, result.content);
+			if (options.successNotice) {
+				new Notice(options.successNotice(result.updatedCount));
+			}
+			return result.updatedCount;
+		}
+
+		if (options.failureNotice) {
+			new Notice(options.failureNotice);
+		}
+
+		return 0;
 	}
 
 	/**
@@ -649,6 +821,26 @@ class GitHubStarsSettingTab extends PluginSettingTab {
 				.setValue(this.plugin.settings.apiToken)
 				.onChange(async (value) => {
 					this.plugin.settings.apiToken = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Update embedded stars on refresh')
+			.setDesc('When enabled, refreshing updates existing embedded star text. When disabled, embedded star text is left unchanged and may show an older value than the refreshed star count.')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.updateEmbeddedStarsOnRefresh)
+				.onChange(async (value) => {
+					this.plugin.settings.updateEmbeddedStarsOnRefresh = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Show token warnings on refresh')
+			.setDesc('When enabled, manual refresh warns if the GitHub token is missing or invalid.')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.showTokenWarnings)
+				.onChange(async (value) => {
+					this.plugin.settings.showTokenWarnings = value;
 					await this.plugin.saveSettings();
 				}));
 
