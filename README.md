@@ -54,10 +54,12 @@ The plugin adds the following commands:
 
 ## ❤️ Support This Project
 
-You can support this project by:
+You can support this project in a few simple ways:
 
-- ⭐ Starring this repo
-- 🔀 Making a pull request
+- ⭐ [Star the repo](https://github.com/flyingnobita/obsidian-github-stars)
+- 🐛 [Report bugs](https://github.com/flyingnobita/obsidian-github-stars/issues)
+- 💡 [Suggest features](https://github.com/flyingnobita/obsidian-github-stars/issues)
+- 📝 [Contribute code](https://github.com/flyingnobita/obsidian-github-stars/pulls)
 
 ## 📄 License
 
