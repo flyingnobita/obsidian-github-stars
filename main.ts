@@ -5,14 +5,12 @@ import { RangeSetBuilder } from '@codemirror/state';
 
 interface GitHubStarsSettings {
 	cacheExpiry: number; // Time in minutes before cache expires
-	displayFormat: string; // Format for displaying stars (e.g., "⭐ {stars}")
 	apiToken: string; // Optional GitHub API token for higher rate limits
 	numberFormat: 'full' | 'abbreviated'; // Number formatting style
 }
 
 const DEFAULT_SETTINGS: GitHubStarsSettings = {
 	cacheExpiry: 1440, // Default cache expiry: 1440 minutes (1 day)
-	displayFormat: "⭐ {stars}",
 	apiToken: "",
 	numberFormat: 'abbreviated'
 }
@@ -572,8 +570,7 @@ export default class GitHubStarsPlugin extends Plugin {
 	 * Format star count according to settings
 	 */
 	formatStarCount(stars: number): string {
-		const formatted = this.settings.displayFormat.replace('{stars}', this.formatNumber(stars));
-		return formatted;
+		return `⭐ ${this.formatNumber(stars)}`;
 	}
 
 	/**
@@ -629,21 +626,6 @@ class GitHubStarsSettingTab extends PluginSettingTab {
 					if (!isNaN(numValue) && numValue > 0) {
 						this.plugin.settings.cacheExpiry = numValue;
 						await this.plugin.saveSettings();
-					}
-				}));
-
-		new Setting(containerEl)
-			.setName('Display format')
-			.setDesc('Format for displaying star counts. Use {stars} as a placeholder for the number.')
-			.addText(text => text
-				.setPlaceholder('⭐ {stars}')
-				.setValue(this.plugin.settings.displayFormat)
-				.onChange(async (value) => {
-					if (value.includes('{stars}')) {
-						this.plugin.settings.displayFormat = value;
-						await this.plugin.saveSettings();
-					} else {
-						new Notice('Display format must include {stars} placeholder');
 					}
 				}));
 
