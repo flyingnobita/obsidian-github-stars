@@ -1,5 +1,24 @@
 # Changelog
 
+- Mar-19, 2026 - 10:59 PM +08 - [Refined refresh behavior, added tests, and updated docs]
+
+## [1.4.0] - 2026-03-19
+
+### Added
+- Unit tests covering cache refresh and embedded star update behavior
+- Refresh token warning setting for missing or invalid GitHub tokens
+- Repo-local `AGENTS.md` and `dev-docs/SPECS.md`
+
+### Changed
+- `Refresh for current note` now bypasses valid cache entries for repositories in the active note
+- Refreshes can update existing embedded stars without embedding plain links
+- When enabled, embedded star updates can also happen on Reading View and Live Preview refresh paths
+- Updated README and internal specs to match current behavior
+
+### Fixed
+- Invalid GitHub tokens now fall back to unauthenticated requests for public repositories
+- Failed refreshes leave existing embedded star text unchanged and show one notice per refresh attempt
+
 ## [1.3.0] - 2026-03-19
 
 ### Removed
