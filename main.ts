@@ -1,7 +1,7 @@
 import { App, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, MarkdownPostProcessorContext, requestUrl } from 'obsidian';
 import { EditorView, ViewPlugin, ViewUpdate, Decoration, DecorationSet, WidgetType } from '@codemirror/view';
 import { RangeSetBuilder } from '@codemirror/state';
-import { extractReposFromContent, findEmbeddedGitHubLinkMatches, findGitHubLinkMatches, GitHubLinkMatch, RepoRef, rewriteGitHubLinksWithStars, shouldUseCachedEntry } from './githubStarsCore';
+import { extractReposFromContent, extractUniqueReposFromContents, findEmbeddedGitHubLinkMatches, findGitHubLinkMatches, GitHubLinkMatch, removeEmbeddedGitHubStars, RepoRef, rewriteGitHubLinksWithStars, shouldUseCachedEntry } from './githubStarsCore';
 
 
 interface GitHubStarsSettings {
@@ -655,19 +655,13 @@ export default class GitHubStarsPlugin extends Plugin {
 		new Notice('Refreshing GitHub star counts for all notes...');
 
 		const markdownFiles = this.app.vault.getMarkdownFiles();
-		const uniqueRepos = new Map<string, RepoRef>();
-
-		for (const file of markdownFiles) {
-			const content = await this.app.vault.read(file);
-			for (const repo of extractReposFromContent(content)) {
-				uniqueRepos.set(this.getRepoCacheKey(repo.owner, repo.repo), repo);
-			}
-		}
+		const contents = await Promise.all(markdownFiles.map((file) => this.app.vault.read(file)));
+		const uniqueRepos = extractUniqueReposFromContents(contents);
 
 		const refreshResults = new Map<string, StarCountFetchResult>();
 		let hadRefreshFailure = false;
 
-		for (const repo of uniqueRepos.values()) {
+		for (const repo of uniqueRepos) {
 			const result = await this.fetchStarCount(repo.owner, repo.repo, true);
 			refreshResults.set(this.getRepoCacheKey(repo.owner, repo.repo), result);
 			hadRefreshFailure = hadRefreshFailure || result.fetchFailed;
@@ -685,9 +679,9 @@ export default class GitHubStarsPlugin extends Plugin {
 		}
 
 		if (this.settings.updateEmbeddedStarsOnRefresh) {
-			new Notice(`Refreshed ${uniqueRepos.size} repositories across all notes and updated ${updatedLinks} embedded star counts.`);
+			new Notice(`Refreshed ${uniqueRepos.length} repositories across all notes and updated ${updatedLinks} embedded star counts.`);
 		} else {
-			new Notice(`Refreshed ${uniqueRepos.size} repositories across all notes.`);
+			new Notice(`Refreshed ${uniqueRepos.length} repositories across all notes.`);
 		}
 	}
 
@@ -760,14 +754,11 @@ export default class GitHubStarsPlugin extends Plugin {
 			return;
 		}
 
-		let content = await this.app.vault.read(file);
+		const content = await this.app.vault.read(file);
+		const result = removeEmbeddedGitHubStars(content);
 
-		// Match GitHub markdown links followed by an embedded star count
-		const starRegex = /(\[[^\]]*\]\(https?:\/\/(?:www\.)?github\.com\/[^)]+\)) ⭐ [\d,.]+[kMB]?/g;
-		const newContent = content.replace(starRegex, '$1');
-
-		if (newContent !== content) {
-			await this.app.vault.modify(file, newContent);
+		if (result.removedCount > 0) {
+			await this.app.vault.modify(file, result.content);
 			new Notice('Removed embedded star counts');
 		} else {
 			new Notice('No embedded star counts found');
@@ -806,17 +797,15 @@ export default class GitHubStarsPlugin extends Plugin {
 		const markdownFiles = this.app.vault.getMarkdownFiles();
 		let filesUpdated = 0;
 		let totalRemoved = 0;
-		const starRegex = /(\[[^\]]*\]\(https?:\/\/(?:www\.)?github\.com\/[^)]+\)) ⭐ [\d,.]+[kMB]?/g;
 
 		for (const file of markdownFiles) {
 			const content = await this.app.vault.read(file);
-			const matches = content.match(starRegex);
-			const newContent = content.replace(starRegex, '$1');
+			const result = removeEmbeddedGitHubStars(content);
 
-			if (newContent !== content) {
-				await this.app.vault.modify(file, newContent);
+			if (result.removedCount > 0) {
+				await this.app.vault.modify(file, result.content);
 				filesUpdated += 1;
-				totalRemoved += matches?.length ?? 0;
+				totalRemoved += result.removedCount;
 			}
 		}
 
