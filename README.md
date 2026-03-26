@@ -66,8 +66,8 @@ The plugin adds the following commands:
 
 ## 🧪 Development
 
-- `npm test`: Runs the unit tests with Vitest
-- `npm run build`: Type-checks and builds the plugin bundle
+- `pnpm test`: Runs the unit tests with Vitest
+- `pnpm build`: Type-checks and builds the plugin bundle
 
 ## ❤️ Support This Project
 
