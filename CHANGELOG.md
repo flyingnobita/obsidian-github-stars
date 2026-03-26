@@ -1,5 +1,15 @@
 # Changelog
 
+- Mar-27, 2026 - 01:23 AM +08 - [Released 1.5.1 with package tooling alignment and pnpm standardization]
+
+## [1.5.1] - 2026-03-27
+
+### Changed
+- Aligned the package manifest and lint toolchain with the current official Obsidian sample plugin
+- Standardized the repository on `pnpm`, removed `package-lock.json`, and documented `pnpm` commands in the README
+- Pinned CodeMirror packages to Obsidian's declared peer versions for cleaner installs
+- Added repo-local `pnpm` build approval for `esbuild`
+
 - Mar-27, 2026 - 12:53 AM +08 - [Released 1.5.0 with vault-wide star maintenance commands and CI enforcement]
 
 ## [1.5.0] - 2026-03-27
