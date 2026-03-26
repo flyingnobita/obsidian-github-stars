@@ -212,6 +212,15 @@ export default class GitHubStarsPlugin extends Plugin {
 			}
 		});
 
+		// Add a command to refresh star counts for every markdown note in the vault
+		this.addCommand({
+			id: 'refresh-github-stars-all-notes',
+			name: 'Refresh for all notes',
+			callback: () => {
+				void this.refreshAllNotes();
+			}
+		});
+
 		// Add a command to embed star counts directly into the markdown file
 		this.addCommand({
 			id: 'embed-github-stars',
@@ -228,6 +237,15 @@ export default class GitHubStarsPlugin extends Plugin {
 			}
 		});
 
+		// Add a command to embed star counts in every markdown note in the vault
+		this.addCommand({
+			id: 'embed-github-stars-all-notes',
+			name: 'Embed star counts in all notes',
+			callback: () => {
+				void this.embedStarCountsForAllNotes();
+			}
+		});
+
 		// Add a command to remove embedded star counts from the file
 		this.addCommand({
 			id: 'remove-embedded-github-stars',
@@ -241,6 +259,15 @@ export default class GitHubStarsPlugin extends Plugin {
 					return true;
 				}
 				return false;
+			}
+		});
+
+		// Add a command to remove embedded star counts from every markdown note in the vault
+		this.addCommand({
+			id: 'remove-embedded-github-stars-all-notes',
+			name: 'Remove embedded star counts from all notes',
+			callback: () => {
+				void this.removeEmbeddedStarCountsFromAllNotes();
 			}
 		});
 	}
@@ -303,6 +330,15 @@ export default class GitHubStarsPlugin extends Plugin {
 
 	private rerenderMarkdownView(view: MarkdownView): void {
 		view.previewMode.rerender(true);
+	}
+
+	private rerenderAllOpenMarkdownViews(): void {
+		this.app.workspace.getLeavesOfType('markdown').forEach((leaf) => {
+			const view = leaf.view;
+			if (view instanceof MarkdownView) {
+				this.rerenderMarkdownView(view);
+			}
+		});
 	}
 
 	private getRepoCacheKey(owner: string, repo: string): string {
@@ -614,6 +650,73 @@ export default class GitHubStarsPlugin extends Plugin {
 		new Notice('Refreshing GitHub star counts...');
 	}
 
+	private async refreshAllNotes(): Promise<void> {
+		this.activeRefreshRunId += 1;
+		new Notice('Refreshing GitHub star counts for all notes...');
+
+		const markdownFiles = this.app.vault.getMarkdownFiles();
+		const uniqueRepos = new Map<string, RepoRef>();
+
+		for (const file of markdownFiles) {
+			const content = await this.app.vault.read(file);
+			for (const repo of extractReposFromContent(content)) {
+				uniqueRepos.set(this.getRepoCacheKey(repo.owner, repo.repo), repo);
+			}
+		}
+
+		const refreshResults = new Map<string, StarCountFetchResult>();
+		let hadRefreshFailure = false;
+
+		for (const repo of uniqueRepos.values()) {
+			const result = await this.fetchStarCount(repo.owner, repo.repo, true);
+			refreshResults.set(this.getRepoCacheKey(repo.owner, repo.repo), result);
+			hadRefreshFailure = hadRefreshFailure || result.fetchFailed;
+		}
+
+		let updatedLinks = 0;
+		if (this.settings.updateEmbeddedStarsOnRefresh) {
+			updatedLinks = await this.updateEmbeddedStarCountsForAllNotes(refreshResults);
+		}
+
+		this.rerenderAllOpenMarkdownViews();
+
+		if (hadRefreshFailure) {
+			new Notice('Finished refreshing all notes, but some GitHub star counts could not be refreshed.');
+		}
+
+		if (this.settings.updateEmbeddedStarsOnRefresh) {
+			new Notice(`Refreshed ${uniqueRepos.size} repositories across all notes and updated ${updatedLinks} embedded star counts.`);
+		} else {
+			new Notice(`Refreshed ${uniqueRepos.size} repositories across all notes.`);
+		}
+	}
+
+	private async updateEmbeddedStarCountsForAllNotes(refreshResults: Map<string, StarCountFetchResult>): Promise<number> {
+		let totalUpdatedLinks = 0;
+
+		for (const file of this.app.vault.getMarkdownFiles()) {
+			const content = await this.app.vault.read(file);
+			const matches = findEmbeddedGitHubLinkMatches(content);
+			if (matches.length === 0) {
+				continue;
+			}
+
+			const result = rewriteGitHubLinksWithStars(content, matches, (match) => {
+				if (refreshResults.get(this.getRepoCacheKey(match.owner, match.repo))?.refreshedFromGitHub !== true) {
+					return null;
+				}
+				return this.getFormattedCachedStars(match);
+			});
+
+			if (result.updatedCount > 0) {
+				await this.app.vault.modify(file, result.content);
+				totalUpdatedLinks += result.updatedCount;
+			}
+		}
+
+		return totalUpdatedLinks;
+	}
+
 	private async updateEmbeddedStarCounts(refreshResults: Map<string, StarCountFetchResult>): Promise<void> {
 		await this.rewriteActiveNoteStars({
 			findMatches: findEmbeddedGitHubLinkMatches,
@@ -668,6 +771,61 @@ export default class GitHubStarsPlugin extends Plugin {
 			new Notice('Removed embedded star counts');
 		} else {
 			new Notice('No embedded star counts found');
+		}
+	}
+
+	async embedStarCountsForAllNotes(): Promise<void> {
+		const markdownFiles = this.app.vault.getMarkdownFiles();
+		let totalUpdatedLinks = 0;
+
+		new Notice(`Embedding star counts across ${markdownFiles.length} notes...`);
+
+		for (const file of markdownFiles) {
+			const content = await this.app.vault.read(file);
+			const matches = findGitHubLinkMatches(content);
+			if (matches.length === 0) {
+				continue;
+			}
+
+			for (const match of matches) {
+				await this.getStarCount(match.owner, match.repo);
+			}
+
+			const result = rewriteGitHubLinksWithStars(content, matches, (match) => this.getFormattedCachedStars(match));
+			if (result.updatedCount > 0) {
+				await this.app.vault.modify(file, result.content);
+				totalUpdatedLinks += result.updatedCount;
+			}
+		}
+
+		this.rerenderAllOpenMarkdownViews();
+		new Notice(`Embedded star counts for ${totalUpdatedLinks} GitHub links across all notes.`);
+	}
+
+	async removeEmbeddedStarCountsFromAllNotes(): Promise<void> {
+		const markdownFiles = this.app.vault.getMarkdownFiles();
+		let filesUpdated = 0;
+		let totalRemoved = 0;
+		const starRegex = /(\[[^\]]*\]\(https?:\/\/(?:www\.)?github\.com\/[^)]+\)) ⭐ [\d,.]+[kMB]?/g;
+
+		for (const file of markdownFiles) {
+			const content = await this.app.vault.read(file);
+			const matches = content.match(starRegex);
+			const newContent = content.replace(starRegex, '$1');
+
+			if (newContent !== content) {
+				await this.app.vault.modify(file, newContent);
+				filesUpdated += 1;
+				totalRemoved += matches?.length ?? 0;
+			}
+		}
+
+		this.rerenderAllOpenMarkdownViews();
+
+		if (filesUpdated > 0) {
+			new Notice(`Removed ${totalRemoved} embedded star counts from ${filesUpdated} notes.`);
+		} else {
+			new Notice('No embedded star counts found in any notes.');
 		}
 	}
 

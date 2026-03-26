@@ -57,9 +57,12 @@ The plugin can be configured in the Settings tab:
 The plugin adds the following commands:
 
 - **Refresh for current note**: Fetches fresh star counts from GitHub for all repositories in the current note and rerenders the note. If `Update embedded stars on refresh` is enabled, it also updates already-embedded star text.
+- **Refresh for all notes**: Fetches fresh star counts from GitHub for repositories found across your entire vault. Duplicate repository links are deduplicated so each repository is fetched once per run. If `Update embedded stars on refresh` is enabled, embedded star text is updated across notes.
 - **Clear cache**: Clears the cached star counts
 - **Embed star counts in current note**: Writes star counts (e.g. `⭐ 1.2k`) directly into the markdown file after each GitHub link. Re-running updates existing counts.
+- **Embed star counts in all notes**: Writes or updates embedded star counts in every markdown note in the vault.
 - **Remove embedded star counts from current note**: Strips all embedded star counts from the file
+- **Remove embedded star counts from all notes**: Removes embedded star counts from every markdown note in the vault.
 
 ## 🧪 Development
 
