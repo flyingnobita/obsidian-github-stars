@@ -1,7 +1,7 @@
 # GitHub Stars Plugin
 
 [![License](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.4.0-green?style=for-the-badge)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.5.0-green?style=for-the-badge)](CHANGELOG.md)
 [![Obsidian Downloads](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fobsidianmd%2Fobsidian-releases%2FHEAD%2Fcommunity-plugin-stats.json&query=%24%5B%22github-stars%22%5D.downloads&logo=obsidian&label=downloads&style=for-the-badge&color=7C3AED)](https://obsidian.md/plugins?id=github-stars)
 
 An Obsidian plugin that automatically displays GitHub star counts next to repository links in your notes — in both Reading View and Live Preview. Star counts can also be embedded directly into your markdown, making them visible outside Obsidian.
@@ -57,9 +57,12 @@ The plugin can be configured in the Settings tab:
 The plugin adds the following commands:
 
 - **Refresh for current note**: Fetches fresh star counts from GitHub for all repositories in the current note and rerenders the note. If `Update embedded stars on refresh` is enabled, it also updates already-embedded star text.
+- **Refresh for all notes**: Fetches fresh star counts from GitHub for repositories found across your entire vault. Duplicate repository links are deduplicated so each repository is fetched once per run. If `Update embedded stars on refresh` is enabled, embedded star text is updated across notes.
 - **Clear cache**: Clears the cached star counts
 - **Embed star counts in current note**: Writes star counts (e.g. `⭐ 1.2k`) directly into the markdown file after each GitHub link. Re-running updates existing counts.
+- **Embed star counts in all notes**: Writes or updates embedded star counts in every markdown note in the vault.
 - **Remove embedded star counts from current note**: Strips all embedded star counts from the file
+- **Remove embedded star counts from all notes**: Removes embedded star counts from every markdown note in the vault.
 
 ## 🧪 Development
 

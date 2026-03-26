@@ -14,6 +14,11 @@ export interface GitHubLinkMatch extends RepoRef {
 	linkText: string;
 }
 
+export interface RemovalResult {
+	content: string;
+	removedCount: number;
+}
+
 export function shouldUseCachedEntry(
 	entry: CacheEntry | undefined,
 	cacheExpiryMinutes: number,
@@ -42,6 +47,18 @@ export function extractReposFromContent(content: string): RepoRef[] {
 		}
 
 		repos.set(`${owner}/${repo}`, { owner, repo });
+	}
+
+	return Array.from(repos.values());
+}
+
+export function extractUniqueReposFromContents(contents: string[]): RepoRef[] {
+	const repos = new Map<string, RepoRef>();
+
+	for (const content of contents) {
+		for (const repo of extractReposFromContent(content)) {
+			repos.set(`${repo.owner}/${repo.repo}`, repo);
+		}
 	}
 
 	return Array.from(repos.values());
@@ -82,6 +99,16 @@ export function rewriteGitHubLinksWithStars(
 	}
 
 	return { content: updatedContent, updatedCount };
+}
+
+export function removeEmbeddedGitHubStars(content: string): RemovalResult {
+	const starRegex = /(\[[^\]]*\]\(https?:\/\/(?:www\.)?github\.com\/[^)]+\)) ⭐ [\d,.]+[kMB]?/g;
+	const matches = content.match(starRegex);
+
+	return {
+		content: content.replace(starRegex, '$1'),
+		removedCount: matches?.length ?? 0,
+	};
 }
 
 function collectLinkMatches(content: string, regex: RegExp): GitHubLinkMatch[] {
