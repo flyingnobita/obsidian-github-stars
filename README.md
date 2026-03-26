@@ -1,7 +1,7 @@
 # GitHub Stars Plugin
 
 [![License](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.4.0-green?style=for-the-badge)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.5.0-green?style=for-the-badge)](CHANGELOG.md)
 [![Obsidian Downloads](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fobsidianmd%2Fobsidian-releases%2FHEAD%2Fcommunity-plugin-stats.json&query=%24%5B%22github-stars%22%5D.downloads&logo=obsidian&label=downloads&style=for-the-badge&color=7C3AED)](https://obsidian.md/plugins?id=github-stars)
 
 An Obsidian plugin that automatically displays GitHub star counts next to repository links in your notes — in both Reading View and Live Preview. Star counts can also be embedded directly into your markdown, making them visible outside Obsidian.

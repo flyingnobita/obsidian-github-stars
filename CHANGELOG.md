@@ -1,5 +1,18 @@
 # Changelog
 
+- Mar-27, 2026 - 12:53 AM +08 - [Released 1.5.0 with vault-wide star maintenance commands and CI enforcement]
+
+## [1.5.0] - 2026-03-27
+
+### Added
+- Commands to refresh, embed, and remove GitHub star counts across all markdown notes in the vault
+- GitHub Actions CI that installs dependencies, runs `pnpm test`, and runs `pnpm build` on pushes and pull requests
+- Unit tests for vault-wide repo deduplication and embedded-star removal helpers
+
+### Changed
+- Refactored vault-wide refresh and removal flows to use shared helper logic covered by unit tests
+- Added declared CodeMirror dependencies required for clean CI and reproducible installs
+
 - Mar-19, 2026 - 10:59 PM +08 - [Refined refresh behavior, added tests, and updated docs]
 
 ## [1.4.0] - 2026-03-19
